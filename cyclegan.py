@@ -1,40 +1,37 @@
 import argparse
 import os
+import sys
 import numpy as np
-import math
 import itertools
-import datetime
-import time
-
+from tqdm import tqdm
 import torchvision.transforms as transforms
 from torchvision.utils import save_image, make_grid
 
 from torch.utils.data import DataLoader
-from torchvision import datasets
 from torch.autograd import Variable
-
-from models import *
-from datasets import *
-from utils import *
 
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+from models import *
+from datasets import *
+from utils import *
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
-parser.add_argument("--n_epochs", type=int, default=2, help="number of epochs of training")
+parser.add_argument("--epoch", type=int, default=5, help="epoch to start training from")
+parser.add_argument("--n_epochs", type=int, default=10, help="number of epochs of training")
 parser.add_argument("--dataset_name", type=str, default="monet2photo", help="name of the dataset")
 parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--decay_epoch", type=int, default=1, help="epoch from which to start lr decay")
+parser.add_argument("--decay_epoch", type=int, default=8, help="epoch from which to start lr decay")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--img_height", type=int, default=64, help="size of image height")
 parser.add_argument("--img_width", type=int, default=64, help="size of image width")
 parser.add_argument("--channels", type=int, default=3, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=10, help="interval between saving generator outputs") # 100
+parser.add_argument("--sample_interval", type=int, default=100, help="interval between saving generator outputs")
 parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between saving model checkpoints")
 parser.add_argument("--n_residual_blocks", type=int, default=9, help="number of residual blocks in generator")
 parser.add_argument("--lambda_cyc", type=float, default=10.0, help="cycle loss weight")
@@ -153,8 +150,7 @@ def sample_images(batches_done):
 
 
 # Training
-prev_time = time.time()
-for epoch in range(opt.epoch, opt.n_epochs):
+for epoch in tqdm(range(opt.epoch, opt.n_epochs)):
     for i, batch in enumerate(dataloader):
 
         # Set model input
@@ -232,17 +228,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         loss_D = (loss_D_A + loss_D_B) / 2
 
-        #  Log Progress
-
-        # Determine approximate time left
-        batches_done = epoch * len(dataloader) + i
-        batches_left = opt.n_epochs * len(dataloader) - batches_done
-        time_left = datetime.timedelta(seconds=batches_left * (time.time() - prev_time))
-        prev_time = time.time()
-
         # Print log
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, adv: %f, cycle: %f, identity: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, adv: %f, cycle: %f, identity: %f]"
             % (
                 epoch+1,
                 opt.n_epochs,
@@ -253,11 +241,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_GAN.item(),
                 loss_cycle.item(),
                 loss_identity.item(),
-                time_left,
             )
         )
 
         # If at sample interval save image
+        batches_done = epoch * len(dataloader) + i
         if batches_done % opt.sample_interval == 0:
             sample_images(batches_done)
 
