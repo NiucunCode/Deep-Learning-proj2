@@ -8,4 +8,3 @@ Datasets include 'monet2photo', 'vangogh2photo', 'cezanne2photo', 'ukiyoe2photo'
 Run predataset.py to build dataset.
 
 Run stargan.py to train or load the model.
-<font size="10" color="red">This is some text!</font>
