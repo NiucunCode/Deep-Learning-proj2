@@ -2,9 +2,6 @@ import argparse
 import os
 import sys
 
-import time
-import datetime
-
 import numpy as np
 from PIL import Image
 
@@ -19,7 +16,6 @@ import torchvision.transforms as transforms
 from torchvision.utils import save_image
 from torchvision import datasets
 
-
 from models import weights_init_normal
 from models import LambdaLR
 from models import GeneratorResNet
@@ -31,30 +27,32 @@ os.makedirs("images", exist_ok=True)
 os.makedirs("saved_models", exist_ok=True)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
-parser.add_argument("--n_epochs", type=int, default=8, help="number of epochs of training")
+parser.add_argument("--epoch", type=int, default=2, help="epoch to start training from")
+parser.add_argument("--n_epochs", type=int, default=50, help="number of epochs of training")
 parser.add_argument("--dataset_name", type=str, default="data", help="name of the dataset")
-parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=4, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.000001, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--decay_epoch", type=int, default=4, help="epoch from which to start lr decay")
+parser.add_argument("--decay_epoch", type=int, default=25, help="epoch from which to start lr decay")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--img_height", type=int, default=64, help="size of image height")
 parser.add_argument("--img_width", type=int, default=64, help="size of image width")
 parser.add_argument("--channels", type=int, default=3, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=100, help="interval between saving generator samples")
+parser.add_argument("--sample_interval", type=int, default=10, help="interval between saving generator samples")
 parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between model checkpoints")
 parser.add_argument("--residual_blocks", type=int, default=6, help="number of residual blocks in generator")
 parser.add_argument("--lambda_cls", type=float, default=1.0, help="domain classification loss weight")
 parser.add_argument("--lambda_rec", type=float, default=10.0, help="reconstruction loss weight")
 parser.add_argument("--lambda_gp", type=float, default=10.0, help="gradient loss weight")
+parser.add_argument("--is_print", type=bool, default=False, help="whether to print the network or not")
 parser.add_argument(
     "--selected_attrs",
     "--list",
     nargs="+",
     help="selected attributes for translation",
-    default=["Monet", "Vangogh", "Ukiyoe", "Cezanne"], # ["Monet", "Vangogh", "Ukiyoe", "Cezanne", "Photo"]
+    default=["Monet", "Vangogh", "Ukiyoe", "Cezanne"],
+    # default=["Monet", "Vangogh", "Ukiyoe", "Cezanne", "Photo"],
 )
 parser.add_argument("--n_critic", type=int, default=5, help="number of training iterations for WGAN discriminator")
 opt = parser.parse_args()
@@ -70,7 +68,20 @@ criterion_cycle = nn.L1Loss()
 
 
 def criterion_cls(logit, target):
-    return F.binary_cross_entropy_with_logits(logit, target, size_average=False) / logit.size(0)
+    return F.binary_cross_entropy_with_logits(logit, target, reduction='sum') / logit.size(0)
+
+
+def print_network(model, name):
+    """
+    Print out the network information
+    https://github.com/yunjey/stargan/blob/master/solver.py
+    """
+    num_params = 0
+    for p in model.parameters():
+        num_params += p.numel()
+    print(model)
+    print(name)
+    print("The number of parameters: {}".format(num_params))
 
 
 # Initialize generator and discriminator
@@ -81,6 +92,10 @@ if cuda:
     generator = generator.cuda()
     discriminator = discriminator.cuda()
     criterion_cycle.cuda()
+
+if opt.is_print:
+    print_network(generator, 'Generator')
+    print_network(discriminator, 'Discriminator')
 
 # Tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -96,17 +111,17 @@ else:
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-
+'''
 lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G,
                                                    lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D,
                                                    lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
-
+'''
 # Configure transforms
 train_transforms = [
     transforms.Resize(int(1.12 * opt.img_height), Image.BICUBIC),
-    transforms.RandomCrop(opt.img_height),
-    transforms.RandomHorizontalFlip(),
+    transforms.CenterCrop(opt.img_height),
+    # transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ]
@@ -156,11 +171,18 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
     return gradient_penalty
 
 
-def sample_images(batches_done):
-    """Saves a generated sample of domain translations"""
-    test_imgs, test_labels = next(iter(test_dataloader))
+# fixed images to test
+fixed_test_imgs, fixed_test_labels = next(iter(test_dataloader)) # TODO:change
+
+
+def sample_images(batches_done, test_imgs, test_labels):
+    """
+    Saves a generated sample of domain translations
+    """
+
     test_imgs = Variable(test_imgs.type(Tensor))
     test_labels = Variable(test_labels.type(Tensor))
+
     img_samples = None
     for i in range(10):
         img, label = test_imgs[i], test_labels[i]
@@ -169,7 +191,6 @@ def sample_images(batches_done):
         imgs = img.repeat(c_dim, 1, 1, 1)
         # Make changes to labels
         labels = Variable(Tensor(np.eye(c_dim)))
-
         # Generate translations
         gen_imgs = generator(imgs, labels)
         # Concatenate images by width
@@ -183,8 +204,7 @@ def sample_images(batches_done):
 
 # Train
 print("Start Training...")
-saved_samples = []
-start_time = time.time()
+
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, (imgs, labels) in enumerate(dataloader):
 
@@ -201,15 +221,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
         sample_l = Variable(Tensor(fake_label))
         # Generate fake batch of images
         fake_imgs = generator(imgs, sample_l)
-
         # Train Discriminator
-
-        optimizer_D.zero_grad()
 
         # Real images
         real_validity, pred_cls = discriminator(imgs)
-        #print(pred_cls)
-        #print(labels)
         # Fake images
         fake_validity, _ = discriminator(fake_imgs.detach())
         # Gradient penalty
@@ -218,17 +233,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
         loss_D_adv = -torch.mean(real_validity) + torch.mean(fake_validity) + opt.lambda_gp * gradient_penalty
         # Classification loss
         loss_D_cls = criterion_cls(pred_cls, labels)
-        # print(loss_D_cls)
         # Total loss
         loss_D = loss_D_adv + opt.lambda_cls * loss_D_cls
         # Backward and optimize
+        optimizer_D.zero_grad()
         loss_D.backward()
         optimizer_D.step()
 
-        optimizer_G.zero_grad()
-
         # Every n_critic times update generator
-        if i % opt.n_critic == 0:
+        if (i+1) % opt.n_critic == 0:
             # Train Generator
 
             # Translate and reconstruct image
@@ -244,18 +257,19 @@ for epoch in range(opt.epoch, opt.n_epochs):
             loss_G_rec = criterion_cycle(recov_imgs, imgs)
             # Total loss
             loss_G = loss_G_adv + opt.lambda_cls * loss_G_cls + opt.lambda_rec * loss_G_rec
-
+            optimizer_G.zero_grad()
             loss_G.backward()
             optimizer_G.step()
 
             # Print log
             sys.stdout.write(
-                "\r[Epoch %d/%d] [Batch %d/%d] [D adv: %f, aux: %f] [G loss: %f, adv: %f, aux: %f, cycle: %f]"
+                "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f, adv: %f, aux: %f] [G loss: %f, adv: %f, aux: %f, cycle: %f]"
                 % (
                     epoch+1,
                     opt.n_epochs,
-                    i,
+                    i+1,
                     len(dataloader),
+                    loss_D.item(),
                     loss_D_adv.item(),
                     loss_D_cls.item(),
                     loss_G.item(),
@@ -267,13 +281,13 @@ for epoch in range(opt.epoch, opt.n_epochs):
         batches_done = epoch * len(dataloader) + i
         # If at sample interval sample and save image
         if batches_done % opt.sample_interval == 0:
-            sample_images(batches_done)
+            sample_images(batches_done, fixed_test_imgs, fixed_test_labels)
 
     # Update learning rates
-    lr_scheduler_G.step()
-    lr_scheduler_D.step()
+    # lr_scheduler_G.step()
+    # lr_scheduler_D.step()
 
     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
         # Save model checkpoints
-        torch.save(generator.state_dict(), "saved_models/generator_%d.pth" % epoch+1)
-        torch.save(discriminator.state_dict(), "saved_models/discriminator_%d.pth" % epoch+1)
+        torch.save(generator.state_dict(), "saved_models/generator_%d.pth" % (epoch+1))
+        torch.save(discriminator.state_dict(), "saved_models/discriminator_%d.pth" % (epoch+1))

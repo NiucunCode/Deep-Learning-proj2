@@ -80,7 +80,7 @@ class GeneratorResNet(nn.Module):
             curr_dim = curr_dim // 2
 
         # Output layer
-        model += [nn.Conv2d(curr_dim, channels, 7, stride=1, padding=3), nn.Tanh()]
+        model += [nn.Conv2d(curr_dim, channels, 7, stride=1, padding=3, bias=False), nn.Tanh()]
 
         self.model = nn.Sequential(*model)
 

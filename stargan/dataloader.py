@@ -12,6 +12,12 @@ from torch.utils.data import Dataset
 from PIL import Image
 
 
+def to_rgb(image):
+    rgb_image = Image.new("RGB", image.size)
+    rgb_image.paste(image)
+    return rgb_image
+
+
 class ImageDataset(Dataset):
     def __init__(self, root, transforms_=None, mode="train", attributes=None):
         self.transform = transforms.Compose(transforms_)
@@ -36,7 +42,13 @@ class ImageDataset(Dataset):
     def __getitem__(self, index):
         filepath = self.files[index % len(self.files)]
         # Extract image as PyTorch tensor
-        img = self.transform(Image.open(filepath))
+        image = Image.open(filepath)
+
+        # Convert grayscale images to rgb
+        if image.mode != "RGB":
+            image = to_rgb(image)
+
+        img = self.transform(image)
         label = self.labels[index % len(self.labels)]
 
         return img, label
